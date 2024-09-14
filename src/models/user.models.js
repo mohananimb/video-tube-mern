@@ -1,7 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { validationRegex } from "../constants";
+import { validationRegex } from "../constants.js";
 
 const userSchema = new Schema(
   {
@@ -19,7 +19,7 @@ const userSchema = new Schema(
       unique: true,
       validate: {
         validator: function (value) {
-          return validationRegex.email.test(val);
+          return validationRegex.email.test(value);
         },
         message: "Provide a valid email.",
       },

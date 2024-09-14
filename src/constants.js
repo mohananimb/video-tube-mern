@@ -4,3 +4,8 @@ export const validationRegex = {
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
   email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
 };
+
+export const cookieOptions = {
+  httpOnly: true,
+  secure: true,
+};
