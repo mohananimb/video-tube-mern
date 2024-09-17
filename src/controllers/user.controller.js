@@ -1,9 +1,13 @@
+import mongoose from "mongoose";
 import { cookieOptions, validationRegex } from "../constants.js";
 import { User } from "../models/user.models.js";
 import { ApiError } from "../utils/apiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { uploadonCloudinary } from "../utils/cloudinary.js";
+import {
+  destroyCloudinaryImage,
+  uploadonCloudinary,
+} from "../utils/cloudinary.js";
 import jwt from "jsonwebtoken";
 
 const getRefreshAndAccessToken = async (userId) => {
@@ -282,6 +286,8 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Failed to upload the file, please try again");
   }
 
+  req.user.avatar && (await destroyCloudinaryImage(req.user.avatar));
+
   // save the url in the DB
   const user = await User.findByIdAndUpdate(
     req.user?._id,
@@ -294,8 +300,6 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
       new: true,
     }
   ).select("-password");
-
-  // TODO - delete an existing image from cloudinary.
 
   //return the res
   return res
@@ -314,9 +318,13 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
 
   // upload to cloudinary
   const coverImage = await uploadonCloudinary(coverImageLocalPath);
+
   if (!coverImage) {
     throw new ApiError(500, "Failed to upload the file, please try again");
   }
+
+  // TODO - delete an existing image from cloudinary.
+  req.user.coverImage && (await destroyCloudinaryImage(req.user.coverImage));
 
   // save the url in the DB
   const user = await User.findByIdAndUpdate(
@@ -331,12 +339,160 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     }
   ).select("-password");
 
-  // TODO - delete an existing image from cloudinary.
-
   //return the res
   return res
     .status(200)
     .json(new ApiResponse(200, user, "Cover image updated successfully."));
+});
+
+const getChannelDetails = asyncHandler(async (req, res) => {
+  // get the username from params
+  const { username } = req.params;
+
+  if (!username) {
+    throw new ApiError(400, "Please provide username.");
+  }
+
+  const channel = await User.aggregate([
+    // 1st pipeline to find the matched user with given username
+    {
+      $match: {
+        username: username?.toLowerCase(),
+      },
+    },
+
+    // 2nd pipeline to find subscribers of this user (channel)
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel",
+        as: "subscribers",
+        // pipeline: [
+        //   {
+        //     $lookup: {
+        //       from: "users",
+        //       foreignField: "_id",
+        //       localField: "channel",
+        //       as: "subscriber",
+        //       pipeline: [
+        //         {
+        //           $project: {
+        //             fullName: 1,
+        //             username: 1,
+        //           },
+        //         },
+        //       ],
+        //     },
+        //   },
+        // ],
+      },
+    },
+
+    // 3rd pipeline to find the to which this user has subscribed to
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subscriber",
+        as: "subscribedTo",
+      },
+    },
+    {
+      $addFields: {
+        subscribersCount: {
+          $size: "$subscribers",
+        },
+        subscribedToCount: {
+          $size: "$subscribedTo",
+        },
+        isSubscribed: {
+          $cond: {
+            if: { $in: [req.user?._id, "$subscribers.subscriber"] },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        fullName: 1,
+        username: 1,
+        subscribersCount: 1,
+        subscribedToCount: 1,
+        isSubscribed: 1,
+        avatar: 1,
+        coverImage: 1,
+        email: 1,
+        // we can add subscribers and subscibe to details as well
+        // subscribers: 1,
+        // subscribedTo: 1,
+      },
+    },
+  ]);
+
+  if (!channel.length) {
+    throw new ApiError(400, "Channel does not exist with given username");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, channel, "Channel fetched successfully."));
+});
+
+const getWatchHistory = asyncHandler(async (req, res) => {
+  const user = await User.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(req.user?._id),
+      },
+    },
+    {
+      $lookup: {
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+        pipeline: [
+          {
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
+                {
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            $addFields: {
+              owner: {
+                $first: "$owner",
+              },
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        user[0].watchHistory,
+        "Watch History fetch successfully."
+      )
+    );
 });
 
 export {
@@ -349,4 +505,6 @@ export {
   updateUserDetails,
   updateUserAvatar,
   updateUserCoverImage,
+  getChannelDetails,
+  getWatchHistory,
 };
